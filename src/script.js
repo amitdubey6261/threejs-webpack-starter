@@ -1,105 +1,242 @@
-import './style.css'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import * as dat from 'dat.gui'
+import * as THREE from 'three';
 
-// Debug
-const gui = new dat.GUI()
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-// Canvas
-const canvas = document.querySelector('canvas.webgl')
 
-// Scene
-const scene = new THREE.Scene()
+let cameraPersp, cameraOrtho, currentCamera;
+let scene, renderer, control, orbit, glbModel ;
+let selectedObject = null;
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const group = new THREE.Group() ; 
 
-// Objects
-const geometry = new THREE.TorusGeometry( .7, .2, 16, 100 );
+init();
+render();
 
-// Materials
+function init() {
 
-const material = new THREE.MeshBasicMaterial()
-material.color = new THREE.Color(0xff0000)
+    renderer = new THREE.WebGLRenderer();
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-// Mesh
-const sphere = new THREE.Mesh(geometry,material)
-scene.add(sphere)
+    const aspect = window.innerWidth / window.innerHeight;
 
-// Lights
+    cameraPersp = new THREE.PerspectiveCamera(50, aspect, 0.01, 30000);
+    cameraOrtho = new THREE.OrthographicCamera(- 600 * aspect, 600 * aspect, 600, - 600, 0.01, 30000);
+    currentCamera = cameraPersp;
 
-const pointLight = new THREE.PointLight(0xffffff, 0.1)
-pointLight.position.x = 2
-pointLight.position.y = 3
-pointLight.position.z = 4
-scene.add(pointLight)
+    currentCamera.position.set(1000, 500, 1000);
+    currentCamera.lookAt(0, 200, 0);
 
-/**
- * Sizes
- */
-const sizes = {
-    width: window.innerWidth,
-    height: window.innerHeight
+    scene = new THREE.Scene();
+    scene.add(new THREE.GridHelper(1000, 10, 0x888888, 0x444444));
+
+    const light = new THREE.DirectionalLight(0xffffff, 2);
+    light.position.set(1, 1, 1);
+    scene.add(light);
+
+
+    const geometry = new THREE.BoxGeometry(200, 200, 200);
+    const material = new THREE.MeshBasicMaterial({ color: '0xff0000' });
+
+    orbit = new OrbitControls(currentCamera, renderer.domElement);
+    orbit.update();
+    orbit.addEventListener('change', render);
+
+    control = new TransformControls(currentCamera, renderer.domElement);
+
+    control.addEventListener('change', render);
+
+    control.addEventListener('dragging-changed', function (event) {
+
+        orbit.enabled = !event.value;
+
+    });
+
+
+
+    new GLTFLoader()
+        .load('Horse.glb ', (gltf) => {
+            scene.add(gltf.scene);
+            group.add(gltf.scene);
+            glbModel = gltf.scene.children[0];
+            // control.attach(glbModel);
+            scene.add(control)
+        })
+
+    new GLTFLoader()
+        .load('Parrot.glb ', (gltf) => {
+            scene.add(gltf.scene);
+            group.add(gltf.scene);
+            glbModel = gltf.scene.children[0];
+            group.add( glbModel );
+        })
+
+        scene.add( group)
+
+    window.addEventListener('resize', onWindowResize);
+
+    window.addEventListener('keydown', function (event) {
+
+        switch (event.keyCode) {
+
+            case 81: // Q
+                control.setSpace(control.space === 'local' ? 'world' : 'local');
+                break;
+
+            case 16: // Shift
+                control.setTranslationSnap(100);
+                control.setRotationSnap(THREE.MathUtils.degToRad(15));
+                control.setScaleSnap(0.25);
+                break;
+
+            case 87: // W
+                control.setMode('translate');
+                break;
+
+            case 69: // E
+                control.setMode('rotate');
+                break;
+
+            case 82: // R
+                control.setMode('scale');
+                break;
+
+            case 67: // C
+                const position = currentCamera.position.clone();
+
+                currentCamera = currentCamera.isPerspectiveCamera ? cameraOrtho : cameraPersp;
+                currentCamera.position.copy(position);
+
+                orbit.object = currentCamera;
+                control.camera = currentCamera;
+
+                currentCamera.lookAt(orbit.target.x, orbit.target.y, orbit.target.z);
+                onWindowResize();
+                break;
+
+            case 86: // V
+                const randomFoV = Math.random() + 0.1;
+                const randomZoom = Math.random() + 0.1;
+
+                cameraPersp.fov = randomFoV * 160;
+                cameraOrtho.bottom = - randomFoV * 500;
+                cameraOrtho.top = randomFoV * 500;
+
+                cameraPersp.zoom = randomZoom * 5;
+                cameraOrtho.zoom = randomZoom * 5;
+                onWindowResize();
+                break;
+
+            case 187:
+            case 107: // +, =, num+
+                control.setSize(control.size + 0.1);
+                break;
+
+            case 189:
+            case 109: // -, _, num-
+                control.setSize(Math.max(control.size - 0.1, 0.1));
+                break;
+
+            case 88: // X
+                control.showX = !control.showX;
+                break;
+
+            case 89: // Y
+                control.showY = !control.showY;
+                break;
+
+            case 90: // Z
+                control.showZ = !control.showZ;
+                break;
+
+            case 32: // Spacebar
+                control.enabled = !control.enabled;
+                break;
+
+            case 27: // Esc
+                control.reset();
+                break;
+
+        }
+
+    });
+
+    document.addEventListener( 'pointermove', onPointerMove );
+
+    window.addEventListener('keyup', function (event) {
+
+        switch (event.keyCode) {
+
+            case 16: // Shift
+                control.setTranslationSnap(null);
+                control.setRotationSnap(null);
+                control.setScaleSnap(null);
+                break;
+
+        }
+
+    });
+
 }
 
-window.addEventListener('resize', () =>
-{
-    // Update sizes
-    sizes.width = window.innerWidth
-    sizes.height = window.innerHeight
+function onWindowResize() {
 
-    // Update camera
-    camera.aspect = sizes.width / sizes.height
-    camera.updateProjectionMatrix()
+    const aspect = window.innerWidth / window.innerHeight;
 
-    // Update renderer
-    renderer.setSize(sizes.width, sizes.height)
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-})
+    cameraPersp.aspect = aspect;
+    cameraPersp.updateProjectionMatrix();
 
-/**
- * Camera
- */
-// Base camera
-const camera = new THREE.PerspectiveCamera(75, sizes.width / sizes.height, 0.1, 100)
-camera.position.x = 0
-camera.position.y = 0
-camera.position.z = 2
-scene.add(camera)
+    cameraOrtho.left = cameraOrtho.bottom * aspect;
+    cameraOrtho.right = cameraOrtho.top * aspect;
+    cameraOrtho.updateProjectionMatrix();
 
-// Controls
-// const controls = new OrbitControls(camera, canvas)
-// controls.enableDamping = true
+    renderer.setSize(window.innerWidth, window.innerHeight);
 
-/**
- * Renderer
- */
-const renderer = new THREE.WebGLRenderer({
-    canvas: canvas
-})
-renderer.setSize(sizes.width, sizes.height)
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    render();
 
-/**
- * Animate
- */
-
-const clock = new THREE.Clock()
-
-const tick = () =>
-{
-
-    const elapsedTime = clock.getElapsedTime()
-
-    // Update objects
-    sphere.rotation.y = .5 * elapsedTime
-
-    // Update Orbital Controls
-    // controls.update()
-
-    // Render
-    renderer.render(scene, camera)
-
-    // Call tick again on the next frame
-    window.requestAnimationFrame(tick)
 }
 
-tick()
+function onPointerMove( event ) {
+
+    if ( selectedObject ) {
+        console.log( selectedObject );
+        control.attach(selectedObject)
+        selectedObject.material.color.set( '#69f' );
+
+    }
+
+    pointer.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+    pointer.y = - ( event.clientY / window.innerHeight ) * 2 + 1;
+
+    raycaster.setFromCamera( pointer, cameraPersp );
+
+    const intersects = raycaster.intersectObject( group, true );
+
+    if ( intersects.length > 0 ) {
+
+        const res = intersects.filter( function ( res ) {
+
+            return res && res.object;
+
+        } )[ 0 ];
+
+        if ( res && res.object ) {
+
+            selectedObject = res.object;
+            selectedObject.material.color.set( '#f00' );
+
+        }
+
+    }
+
+}
+
+function render() {
+
+    renderer.render(scene, currentCamera);
+
+}
